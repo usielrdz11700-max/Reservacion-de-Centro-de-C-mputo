@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.5">
+  <title>Reservaciones de centro de computo - UPSLP</title>
+  <!-- Tailwind + FontAwesome CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  
+  <!-- SDKs de Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getFirestore, collection, getDocs, setDoc, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    // CONFIGURA AQUÍ TUS CREDENCIALES DE FIREBASE
+    const firebaseConfig = {
+      apiKey: "TU_API_KEY",
+      authDomain: "TU_DOMINIO.firebaseapp.com",
+      projectId: "reservaciones-de-computo",
+      storageBucket: "TU_STORAGE.appspot.com",
+      messagingSenderId: "TU_SENDER_ID",
+      appId: "TU_APP_ID"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    
+    window.db = db;
+    window.firebaseModules = { collection, getDocs, setDoc, doc, deleteDoc };
+    
+    // Disparar evento cuando Firebase esté listo
+    window.dispatchEvent(new Event('firebase-ready'));
+  </script>
+
+  <style>
+    :root {
+      --upslp-blue: #0f2c59;
+      --upslp-blue-dark: #071936;
+      --upslp-blue-light: #1d4ed8;
+      --upslp-orange: #f97316;
+      --upslp-yellow: #f59e0b;
+      --upslp-bg: #f8fafc;
+    }
+    body {
+      background: linear-gradient(145deg, #f1f5f9 0%, #e2e8f0 100%);
+      min-height: 100vh;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+    .glass-panel {
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(15, 44, 89, 0.15);
+      box-shadow: 0 20px 40px -12px rgba(15,44,89,0.12), 0 8px 24px -6px rgba(0,0,0,0.02);
+    }
+    .seat-pc {
+      transition: all 0.2s ease;
+      cursor: pointer;
+      user-select: none;
+    }
+    .seat-pc:hover:not(.ocupado):not(.no-disponible-sw) {
+      transform: scale(1.08);
+      box-shadow: 0 4px 12px rgba(15,44,89,0.2);
+    }
+    .seat-pc.selected {
+      background-color: var(--upslp-orange) !important;
+      color: white !important;
+      border-color: #ea580c !important;
+      box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.3);
+    }
+    .seat-pc.ocupado {
+      background-color: #cbd5e1 !important;
+      color: #64748b !important;
+      border-color: #94a3b8 !important;
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+    .seat-pc.no-disponible-sw {
+      background-color: #fee2e2 !important;
+      color: #991b1b !important;
+      border-color: #fca5a5 !important;
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+    .select-clean {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%230f2c59' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 1rem center;
+      background-size: 1.1rem;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .input-focus:focus {
+      border-color: var(--upslp-blue);
+      box-shadow: 0 0 0 3px rgba(15,44,89,0.15);
+      outline: none;
+    }
+    .fila-reserva {
+      border-bottom: 1px solid #e2e8f0;
+      transition: background 0.1s;
+    }
+    .fila-reserva:hover {
+      background: #f8fafc;
+    }
+    .scroll-table {
+      max-height: 360px;
+      overflow-y: auto;
+    }
+    .scroll-table::-webkit-scrollbar {
+      width: 6px;
+    }
+    .scroll-table::-webkit-scrollbar-thumb {
+      background: #94a3b8;
+      border-radius: 10px;
+    }
+    .mensaje-flotante {
+      animation: fadeSlide 0.3s ease forwards;
+    }
+    @keyframes fadeSlide {
+      0% { opacity: 0; transform: translateY(-5px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+
+<div class="max-w-6xl mx-auto px-4 py-6 md:py-8">
+  
+  <!-- Encabezado general -->
+  <div class="flex flex-wrap items-center justify-between gap-3 mb-6 bg-white/90 p-4 rounded-2xl shadow-sm border border-[var(--upslp-blue)]/20">
+    <div class="flex items-center gap-3">
+      <div class="w-12 h-12 rounded-xl bg-[var(--upslp-blue)] text-white flex items-center justify-center text-xl shadow-md">
+        <i class="fas fa-university"></i>
+      </div>
+      <div>
+        <h1 class="text-xl md:text-2xl font-bold tracking-tight text-[var(--upslp-blue)]">
+          Centro de Cómputo · UPSLP
+        </h1>
+        <p class="text-xs text-gray-600 mt-0.5 flex items-center gap-1.5 font-medium">
+          <i class="fas fa-calendar-alt text-[var(--upslp-orange)]"></i> Lun–Sáb · 8:00 AM – 8:00 PM · 30 Equipos
+        </p>
+      </div>
+    </div>
+    <div id="headerAcciones" class="flex items-center gap-2"></div>
+  </div>
+
+  <!-- Panel principal -->
+  <div class="glass-panel rounded-3xl p-5 md:p-8 transition-all">
+
+    <!-- 1. SELECCIÓN DE ROL -->
+    <div id="vistaSeleccionRol" class="py-10 max-w-xl mx-auto text-center">
+      <div class="w-20 h-20 bg-[var(--upslp-blue)] text-white rounded-3xl mx-auto flex items-center justify-center text-3xl shadow-lg mb-6">
+        <i class="fas fa-desktop"></i>
+      </div>
+      <h2 class="text-2xl font-bold text-[var(--upslp-blue)] mb-2">Bienvenido al Sistema de Reservaciones</h2>
+      <p class="text-sm text-gray-600 mb-8">Por favor, selecciona cómo deseas ingresar a la plataforma institucional.</p>
+      
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <button id="btnRolEstudiante" class="p-6 bg-white hover:bg-slate-50 border-2 border-[var(--upslp-blue)]/20 hover:border-[var(--upslp-orange)] rounded-2xl shadow-sm transition-all text-left flex flex-col justify-between group">
+          <div>
+            <div class="w-12 h-12 rounded-xl bg-[var(--upslp-blue)]/10 text-[var(--upslp-blue)] group-hover:bg-[var(--upslp-orange)] group-hover:text-white flex items-center justify-center text-xl mb-4 transition-colors">
+              <i class="fas fa-user-graduate"></i>
+            </div>
+            <h3 class="font-bold text-lg text-[var(--upslp-blue)]">Entrar como Estudiante</h3>
+            <p class="text-xs text-gray-500 mt-1">Identifícate con tu matrícula para apartar equipos y gestionar tus propias citas.</p>
+          </div>
+          <span class="mt-4 text-xs font-semibold text-[var(--upslp-orange)] flex items-center gap-1">Ingresar matrícula <i class="fas fa-arrow-right"></i></span>
+        </button>
+
+        <button id="btnRolAdmin" class="p-6 bg-white hover:bg-slate-50 border-2 border-[var(--upslp-blue)]/20 hover:border-[var(--upslp-blue)] rounded-2xl shadow-sm transition-all text-left flex flex-col justify-between group">
+          <div>
+            <div class="w-12 h-12 rounded-xl bg-[var(--upslp-blue)]/10 text-[var(--upslp-blue)] group-hover:bg-[var(--upslp-blue)] group-hover:text-white flex items-center justify-center text-xl mb-4 transition-colors">
+              <i class="fas fa-user-shield"></i>
+            </div>
+            <h3 class="font-bold text-lg text-[var(--upslp-blue)]">Entrar como Administrador</h3>
+            <p class="text-xs text-gray-500 mt-1">Gestiona reservaciones globales, elimina registros y modifica el software de cada PC.</p>
+          </div>
+          <span class="mt-4 text-xs font-semibold text-[var(--upslp-blue)] flex items-center gap-1">Iniciar sesión <i class="fas fa-arrow-right"></i></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 1.1 LOGIN ESTUDIANTE -->
+    <div id="vistaEstudianteLogin" class="hidden max-w-md mx-auto py-6">
+      <div class="text-center mb-6">
+        <div class="w-16 h-16 bg-[var(--upslp-orange)] text-white rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-md mb-3">
+          <i class="fas fa-user-graduate"></i>
+        </div>
+        <h2 class="text-xl font-bold text-[var(--upslp-blue)]">Acceso de Estudiante</h2>
+        <p class="text-xs text-gray-600 mt-1">Ingresa tus datos personales para acceder a tu sesión.</p>
+      </div>
+
+      <form id="estudianteLoginForm" class="space-y-4">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1.5">Matrícula (6 dígitos)</label>
+          <input type="text" id="estudianteLoginMatricula" placeholder="Ej. 182315" maxlength="6" pattern="\d{6}" class="w-full rounded-xl border border-gray-300 bg-white/90 px-4 py-3 font-bold tracking-widest input-focus" required>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1.5">Nombre Completo</label>
+          <input type="text" id="estudianteLoginNombre" placeholder="Ej. Juan Pérez López" class="w-full rounded-xl border border-gray-300 bg-white/90 px-4 py-3 input-focus" required>
+        </div>
+        <div class="flex gap-3 pt-2">
+          <button type="button" id="btnVolverSeleccionEstudiante" class="w-1/3 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-3 rounded-xl text-xs transition-all">Volver</button>
+          <button type="submit" class="w-2/3 bg-[var(--upslp-orange)] hover:bg-[#ea580c] text-white font-semibold py-3 rounded-xl shadow-md transition-all text-xs">Entrar a mi Sesión</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- 2. LOGIN ADMINISTRADOR -->
+    <div id="vistaAdminLogin" class="hidden max-w-md mx-auto py-6">
+      <div class="text-center mb-6">
+        <div class="w-16 h-16 bg-[var(--upslp-blue)] text-white rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-md mb-3">
+          <i class="fas fa-user-shield"></i>
+        </div>
+        <h2 class="text-xl font-bold text-[var(--upslp-blue)]">Acceso de Administrador</h2>
+        <p class="text-xs text-gray-600 mt-1">Ingresa las credenciales autorizadas.</p>
+      </div>
+
+      <form id="adminLoginForm" class="space-y-4">
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1.5">Correo electrónico autorizado</label>
+          <input type="email" id="adminEmail" placeholder="usiel11700@gmail.com" class="w-full rounded-xl border border-gray-300 bg-white/90 px-4 py-3 input-focus" required>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-gray-700 mb-1.5">Contraseña de acceso</label>
+          <input type="password" id="adminPassword" placeholder="••••••••" class="w-full rounded-xl border border-gray-300 bg-white/90 px-4 py-3 input-focus" required>
+        </div>
+        <div class="flex gap-3 pt-2">
+          <button type="button" id="btnVolverSeleccionAdmin" class="w-1/3 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-3 rounded-xl text-xs transition-all">Volver</button>
+          <button type="submit" class="w-2/3 bg-[var(--upslp-orange)] hover:bg-[#ea580c] text-white font-semibold py-3 rounded-xl shadow-md transition-all text-xs">Entrar al Panel</button>
+        </div>
+      </form>
+      <div id="adminLoginFeedback" class="mt-4 text-center text-sm font-medium"></div>
+    </div>
+
+    <!-- 3. VISTA ALUMNO -->
+    <div id="vistaAlumno" class="hidden">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-5 border-b border-[var(--upslp-blue)]/15 pb-3">
+        <div>
+          <h2 class="text-lg font-bold text-[var(--upslp-blue)] flex items-center gap-2">
+            <i class="fas fa-desktop text-[var(--upslp-orange)]"></i> Sala de Cómputo · Apartado de Equipos
+          </h2>
+          <p class="text-xs text-gray-600 mt-0.5">Alumno: <span id="lblAlumnoConectado" class="font-bold text-[var(--upslp-orange)]"></span> (Matrícula: <span id="lblMatriculaConectada" class="font-mono font-bold"></span>)</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button id="btnVerMisReservas" class="text-xs bg-[var(--upslp-blue)] text-white font-semibold px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 shadow-sm">
+            <i class="fas fa-ticket-alt"></i> Mis Reservaciones <span id="badgeMisReservasCount" class="bg-white text-[var(--upslp-blue)] px-1.5 py-0.2 rounded-full text-[0.65rem] font-bold">0</span>
+          </button>
+          <button id="btnIrQuejasDesdeAlumno" class="text-xs bg-[var(--upslp-orange)]/10 hover:bg-[var(--upslp-orange)]/20 text-[var(--upslp-orange)] font-semibold px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5">
+            <i class="fas fa-triangle-exclamation"></i> Reportar Falla / QR Jira
+          </button>
+          <button id="btnCerrarSesionEstudiante" class="text-xs bg-rose-100 hover:bg-rose-200 text-rose-800 font-semibold px-3.5 py-2 rounded-xl transition-all border border-rose-200">
+            <i class="fas fa-sign-out-alt mr-1"></i> Cerrar Sesión
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 bg-slate-50/90 p-5 rounded-2xl border border-[var(--upslp-blue)]/15">
+        <div>
+          <label class="block text-xs font-semibold text-gray-700 mb-1.5"><i class="fas fa-calendar-day mr-1 text-[var(--upslp-blue)]"></i> Fecha (Lunes a Sábado)</label>
+          <input type="date" id="filtroFecha" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm input-focus" required>
+          <p id="errorDiaSemana" class="text-[0.65rem] text-rose-600 mt-1 hidden font-medium"><i class="fas fa-exclamation-circle"></i> Los domingos no hay servicio.</p>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-700 mb-1.5"><i class="fas fa-clock mr-1 text-[var(--upslp-blue)]"></i> Bloque de Hora</label>
+          <select id="filtroBloque" class="select-clean w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm input-focus">
+            <option value="">-- Selecciona hora --</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-700 mb-1.5"><i class="fas fa-layer-group mr-1 text-[var(--upslp-blue)]"></i> Software Necesario</label>
+          <div id="contenedorCheckboxesSoftware" class="bg-white border border-gray-300 rounded-xl p-2.5 max-h-32 overflow-y-auto space-y-1.5 text-xs"></div>
+        </div>
+      </div>
+
+      <div class="mb-6 flex justify-center gap-4 text-[0.7rem] text-gray-600 font-medium">
+        <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-md bg-white border border-gray-300 inline-block"></span> Disponible</span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-md bg-[var(--upslp-orange)] inline-block"></span> Seleccionada</span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-md bg-[#fee2e2] border border-red-300 inline-block"></span> Sin Software Requerido</span>
+        <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-md bg-[#cbd5e1] inline-block"></span> Ocupada</span>
+      </div>
+
+      <div id="salaCineContainer" class="bg-white/60 p-6 rounded-2xl border border-[var(--upslp-blue)]/10 mb-6"></div>
+
+      <div id="panelFormReserva" class="hidden bg-white border-2 border-[var(--upslp-orange)]/40 p-5 rounded-2xl shadow-sm space-y-4 mensaje-flotante">
+        <div class="flex items-center justify-between border-b border-gray-100 pb-2">
+          <h3 class="text-sm font-bold text-[var(--upslp-blue)]">Confirmar Apartado para <span id="lblPcSeleccionada" class="text-[var(--upslp-orange)] font-mono"></span></h3>
+          <button type="button" id="btnCancelarSeleccionPC" class="text-xs text-gray-400 hover:text-gray-600 font-semibold"><i class="fas fa-times"></i> Cambiar</button>
+        </div>
+        <div class="bg-slate-50 p-3 rounded-xl text-xs space-y-1 text-gray-700">
+          <p><b>Alumno:</b> <span id="confNombreAlumno" class="font-bold text-[var(--upslp-blue)]"></span></p>
+          <p><b>Matrícula:</b> <span id="confMatriculaAlumno" class="font-mono font-bold text-[var(--upslp-orange)]"></span></p>
+          <p><b>Software:</b> <span id="confSoftwareLista" class="text-[var(--upslp-blue)] font-semibold"></span></p>
+        </div>
+        <button type="button" id="btnConfirmarReservaFinal" class="w-full bg-[var(--upslp-orange)] hover:bg-[#ea580c] text-white font-semibold py-3 rounded-xl flex items-center justify-center gap-2 text-xs shadow-md transition-all">
+          <i class="fas fa-bookmark"></i> Completar y Registrar Reservación en la Nube
+        </button>
+      </div>
+      <div id="mensajeFeedback" class="mt-4 text-center text-sm font-medium"></div>
+    </div>
+
+    <!-- 3.1 VISTA MIS RESERVAS -->
+    <div id="vistaMisReservas" class="hidden max-w-3xl mx-auto py-2">
+      <div class="flex items-center justify-between mb-4 border-b border-gray-200 pb-3">
+        <h2 class="text-lg font-bold text-[var(--upslp-blue)]"><i class="fas fa-ticket-alt text-[var(--upslp-orange)]"></i> Mis Reservaciones</h2>
+        <button id="btnVolverDesdeMisReservas" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold px-3.5 py-2 rounded-xl">Volver</button>
+      </div>
+      <div class="scroll-table border border-[var(--upslp-blue)]/20 rounded-2xl bg-white shadow-sm mb-4">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-100 sticky top-0 text-xs uppercase text-[var(--upslp-blue)] font-bold">
+            <tr><th class="py-3 px-4">Equipo</th><th class="py-3 px-4">Software</th><th class="py-3 px-4">Fecha</th><th class="py-3 px-4">Bloque</th><th class="py-3 px-4 text-center">Acciones</th></tr>
+          </thead>
+          <tbody id="tablaMisReservasBody"><tr><td colspan="5" class="text-center text-gray-400 py-8">Cargando...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 4. VISTA ADMINISTRADOR -->
+    <div id="vistaAdminPanel" class="hidden">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div>
+          <h2 class="text-lg font-bold text-[var(--upslp-blue)]"><i class="fas fa-shield-alt text-[var(--upslp-orange)]"></i> Panel Global de Administración</h2>
+          <p class="text-xs text-gray-600">Visualizando registros centralizados desde la Base de Datos en la Nube.</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="text-xs bg-white px-3.5 py-1.5 rounded-full text-gray-700 font-semibold border border-[var(--upslp-blue)]/20 shadow-sm">
+            Total reservas en la nube: <span id="totalReservasContador" class="text-[var(--upslp-blue)] font-bold">0</span>
+          </span>
+          <button id="btnCerrarSesionAdmin" class="text-xs bg-rose-100 hover:bg-rose-200 text-rose-800 font-semibold px-3.5 py-1.5 rounded-full">Cerrar sesión</button>
+        </div>
+      </div>
+
+      <div class="scroll-table border border-[var(--upslp-blue)]/20 rounded-2xl bg-white/90 shadow-sm mb-6">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-100 sticky top-0 text-xs uppercase text-[var(--upslp-blue)] font-bold">
+            <tr><th class="py-3 px-4">Equipo</th><th class="py-3 px-4">Matrícula</th><th class="py-3 px-4">Alumno</th><th class="py-3 px-4">Software Usado</th><th class="py-3 px-4">Fecha</th><th class="py-3 px-4">Bloque</th><th class="py-3 px-4 text-center">Acciones</th></tr>
+          </thead>
+          <tbody id="tablaReservasBody"><tr><td colspan="7" class="text-center text-gray-400 py-8">Cargando registros...</td></tr></tbody>
+        </table>
+      </div>
+
+      <div>
+        <div class="flex items-center gap-2 mb-3">
+          <i class="fas fa-cogs text-[var(--upslp-orange)]"></i>
+          <span class="text-sm font-bold text-gray-700">Administrar Software Instalado por Computadora (Sincronizado)</span>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-h-96 overflow-y-auto bg-white/80 p-4 rounded-2xl border border-[var(--upslp-blue)]/10" id="adminGridSwContainer"></div>
+      </div>
+    </div>
+
+    <!-- 5. VISTA QUEJAS -->
+    <div id="vistaQuejas" class="hidden max-w-2xl mx-auto py-4 text-center">
+      <div class="mb-4 flex items-center justify-between">
+        <button id="btnVolverDesdeQuejas" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold px-3 py-2 rounded-xl">Regresar</button>
+        <h2 class="text-lg font-bold text-[var(--upslp-blue)]">Reportes y Observaciones de Equipos</h2>
+        <div class="w-16"></div>
+      </div>
+      <div class="bg-white p-6 rounded-2xl border border-[var(--upslp-blue)]/25 shadow-sm space-y-4">
+        <div class="w-16 h-16 bg-[var(--upslp-blue)] text-white rounded-2xl mx-auto flex items-center justify-center text-2xl shadow-md mb-2"><i class="fas fa-tools"></i></div>
+        <p class="text-xs text-gray-600">¿Alguna PC no funciona, le falta software o presenta fallas físicas? Repórtala en Jira.</p>
+        <div class="inline-block p-3 bg-gray-50 rounded-2xl border border-gray-200 shadow-inner">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=https://usielrdz11700.atlassian.net/jira/software/c/form/33fdb779-f156-4510-bdda-6b31fadaec59" alt="QR" class="mx-auto rounded-lg">
+        </div>
+        <div class="pt-2">
+          <a href="https://usielrdz11700.atlassian.net/jira/software/c/form/33fdb779-f156-4510-bdda-6b31fadaec59" target="_blank" class="inline-flex items-center gap-2 bg-[var(--upslp-orange)] text-white text-sm font-semibold px-6 py-3 rounded-xl shadow-md">
+            <i class="fas fa-external-link-alt"></i> Ir a Jira
+          </a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  window.addEventListener('firebase-ready', async function() {
+    const SOFTWARE_CATALOGO = [
+      'AutoCAD', 'SolidWorks', 'MATLAB', 'Python/Anaconda', 
+      'Visual Studio Code', 'Java/Eclipse', 'LabVIEW', 'Revit', 'Packet Tracer', 'SPSS'
+    ];
+
+    let pcMapaSw = {};
+    let reservas = [];
+    let alumnoSesion = JSON.parse(localStorage.getItem('upslp_alumno_sesion') || 'null');
+    let pcSeleccionada = null;
+
+    // Elementos DOM
+    const vistaSeleccionRol = document.getElementById('vistaSeleccionRol');
+    const vistaEstudianteLogin = document.getElementById('vistaEstudianteLogin');
+    const vistaAdminLogin = document.getElementById('vistaAdminLogin');
+    const vistaAlumno = document.getElementById('vistaAlumno');
+    const vistaMisReservas = document.getElementById('vistaMisReservas');
+    const vistaAdminPanel = document.getElementById('vistaAdminPanel');
+    const vistaQuejas = document.getElementById('vistaQuejas');
+
+    const btnRolEstudiante = document.getElementById('btnRolEstudiante');
+    const btnRolAdmin = document.getElementById('btnRolAdmin');
+    const estudianteLoginForm = document.getElementById('estudianteLoginForm');
+    const estudianteLoginMatricula = document.getElementById('estudianteLoginMatricula');
+    const estudianteLoginNombre = document.getElementById('estudianteLoginNombre');
+    const btnVolverSeleccionEstudiante = document.getElementById('btnVolverSeleccionEstudiante');
+    const btnVolverSeleccionAdmin = document.getElementById('btnVolverSeleccionAdmin');
+    
+    const btnCerrarSesionEstudiante = document.getElementById('btnCerrarSesionEstudiante');
+    const btnCerrarSesionAdmin = document.getElementById('btnCerrarSesionAdmin');
+    const btnIrQuejasDesdeAlumno = document.getElementById('btnIrQuejasDesdeAlumno');
+    const btnVolverDesdeQuejas = document.getElementById('btnVolverDesdeQuejas');
+    const btnVerMisReservas = document.getElementById('btnVerMisReservas');
+    const btnVolverDesdeMisReservas = document.getElementById('btnVolverDesdeMisReservas');
+    const badgeMisReservasCount = document.getElementById('badgeMisReservasCount');
+    const headerAcciones = document.getElementById('headerAcciones');
+
+    const adminLoginForm = document.getElementById('adminLoginForm');
+    const adminEmailInput = document.getElementById('adminEmail');
+    const adminPasswordInput = document.getElementById('adminPassword');
+    const adminLoginFeedback = document.getElementById('adminLoginFeedback');
+
+    const filtroFecha = document.getElementById('filtroFecha');
+    const errorDiaSemana = document.getElementById('errorDiaSemana');
+    const filtroBloque = document.getElementById('filtroBloque');
+    const contenedorCheckboxesSoftware = document.getElementById('contenedorCheckboxesSoftware');
+    const salaCineContainer = document.getElementById('salaCineContainer');
+    const panelFormReserva = document.getElementById('panelFormReserva');
+    const lblPcSeleccionada = document.getElementById('lblPcSeleccionada');
+    const btnCancelarSeleccionPC = document.getElementById('btnCancelarSeleccionPC');
+    const confNombreAlumno = document.getElementById('confNombreAlumno');
+    const confMatriculaAlumno = document.getElementById('confMatriculaAlumno');
+    const confSoftwareLista = document.getElementById('confSoftwareLista');
+    const btnConfirmarReservaFinal = document.getElementById('btnConfirmarReservaFinal');
+    const feedback = document.getElementById('mensajeFeedback');
+
+    const lblAlumnoConectado = document.getElementById('lblAlumnoConectado');
+    const lblMatriculaConectada = document.getElementById('lblMatriculaConectada');
+    const tablaMisReservasBody = document.getElementById('tablaMisReservasBody');
+
+    const tablaBody = document.getElementById('tablaReservasBody');
+    const totalReservasSpan = document.getElementById('totalReservasContador');
+    const adminGridSwContainer = document.getElementById('adminGridSwContainer');
+
+    function generarBloques() {
+      const bloques = [];
+      for (let i = 8; i < 20; i++) {
+        bloques.push(`${i.toString().padStart(2, '0')}:00 - ${(i + 1).toString().padStart(2, '0')}:00`);
+      }
+      return bloques;
+    }
+    const BLOQUES = generarBloques();
+
+    function populateBloques() {
+      filtroBloque.innerHTML = '<option value="">-- Selecciona hora --</option>';
+      BLOQUES.forEach(b => {
+        const opt = document.createElement('option');
+        opt.value = b;
+        opt.textContent = b;
+        filtroBloque.appendChild(opt);
+      });
+    }
+
+    function populateCheckboxesSoftware() {
+      let html = '';
+      SOFTWARE_CATALOGO.forEach(sw => {
+        html += `
+          <label class="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded">
+            <input type="checkbox" value="${sw}" class="checkbox-sw rounded border-gray-300 text-[var(--upslp-orange)] focus:ring-[var(--upslp-orange)]">
+            <span class="text-gray-700">${sw}</span>
+          </label>
+        `;
+      });
+      contenedorCheckboxesSoftware.innerHTML = html;
+      document.querySelectorAll('.checkbox-sw').forEach(chk => {
+        chk.addEventListener('change', renderizarSalaCine);
+      });
+    }
+
+    function obtenerSoftwareSeleccionados() {
+      return Array.from(document.querySelectorAll('.checkbox-sw:checked')).map(c => c.value);
+    }
+
+    async function sincronizarDatosDesdeNube() {
+      try {
+        const { collection, getDocs, setDoc, doc } = window.firebaseModules;
+        
+        // Cargar software de PCs
+        const snapPcs = await getDocs(collection(window.db, "config_pcs"));
+        if (snapPcs.empty) {
+          for (let i = 1; i <= 30; i++) {
+            const pcId = `PC${i}`;
+            const sws = [...SOFTWARE_CATALOGO].sort(() => 0.5 - Math.random()).slice(0, 3 + Math.floor(Math.random() * 3));
+            pcMapaSw[pcId] = sws;
+            await setDoc(doc(window.db, "config_pcs", pcId), { software: sws });
+          }
+        } else {
+          snapPcs.forEach(d => { pcMapaSw[d.id] = d.data().software; });
+        }
+
+        // Cargar Reservas globales de la nube
+        const snapReservas = await getDocs(collection(window.db, "reservas"));
+        reservas = [];
+        snapReservas.forEach(d => { reservas.push(d.data()); });
+
+        actualizarContadorMisReservas();
+      } catch (e) {
+        console.error("Error al sincronizar con Firebase:", e);
+      }
+    }
+
+    function esDomingo(fechaStr) {
+      if (!fechaStr) return false;
+      const partes = fechaStr.split('-');
+      return new Date(partes[0], partes[1] - 1, partes[2]).getDay() === 0;
+    }
+
+    function actualizarContadorMisReservas() {
+      if (!alumnoSesion) { badgeMisReservasCount.textContent = '0'; return; }
+      badgeMisReservasCount.textContent = reservas.filter(r => r.matricula === alumnoSesion.matricula).length;
+    }
+
+    function renderizarSalaCine() {
+      const fecha = filtroFecha.value;
+      const bloque = filtroBloque.value;
+      const swSeleccionados = obtenerSoftwareSeleccionados();
+
+      if (fecha && esDomingo(fecha)) {
+        errorDiaSemana.classList.remove('hidden');
+        salaCineContainer.innerHTML = `<div class="text-center py-8 text-rose-600 text-sm font-semibold"><i class="fas fa-ban text-3xl mb-2 block"></i>El centro de cómputo está cerrado los domingos.</div>`;
+        panelFormReserva.classList.add('hidden');
+        return;
+      }
+      errorDiaSemana.classList.add('hidden');
+
+      if (!fecha || !bloque) {
+        salaCineContainer.innerHTML = `<div class="text-center py-8 text-gray-500 text-sm"><i class="fas fa-calendar-alt text-2xl text-[var(--upslp-orange)] mb-2 block"></i>Selecciona fecha y hora.</div>`;
+        panelFormReserva.classList.add('hidden');
+        return;
+      }
+
+      let html = `<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 sm:gap-4">`;
+      for (let i = 1; i <= 30; i++) {
+        const pcId = `PC${i}`;
+        const swsPC = pcMapaSw[pcId] || [];
+        const ocupada = reservas.some(r => r.pc === pcId && r.fecha === fecha && r.bloque === bloque);
+        const cubreSoftware = swSeleccionados.every(swReq => swsPC.includes(swReq));
+
+        let estadoClase = 'bg-white border-2 border-gray-300 text-gray-700';
+        let tipoEstado = 'disponible';
+
+        if (ocupada) { estadoClase = 'ocupado'; tipoEstado = 'ocupado'; }
+        else if (!cubreSoftware && swSeleccionados.length > 0) { estadoClase = 'no-disponible-sw'; tipoEstado = 'no-sw'; }
+        else if (pcSeleccionada === pcId) { estadoClase = 'selected'; tipoEstado = 'seleccionado'; }
+
+        html += `
+          <div data-pcid="${pcId}" data-estado="${tipoEstado}" class="seat-pc ${estadoClase} rounded-xl p-3 text-center flex flex-col items-center justify-center h-20 shadow-sm">
+            <span class="text-xs font-bold leading-none mb-1">${pcId}</span>
+            <i class="fas fa-desktop text-sm opacity-70"></i>
+            <span class="text-[0.55rem] text-gray-500 mt-1">${swsPC.length} SWs</span>
+          </div>`;
+      }
+      html += `</div>`;
+      salaCineContainer.innerHTML = html;
+
+      document.querySelectorAll('.seat-pc').forEach(el => {
+        el.addEventListener('click', function() {
+          const estado = this.getAttribute('data-estado');
+          const pcId = this.getAttribute('data-pcid');
+          if (estado === 'ocupado') { feedback.innerHTML = `<span class="text-amber-800 bg-amber-100 px-3 py-1 rounded-lg text-xs">El equipo ${pcId} ya está reservado.</span>`; return; }
+          if (estado === 'no-sw') { feedback.innerHTML = `<span class="text-rose-800 bg-rose-100 px-3 py-1 rounded-lg text-xs">El equipo ${pcId} no cuenta con el software solicitado.</span>`; return; }
+
+          feedback.innerHTML = '';
+          pcSeleccionada = pcId;
+          lblPcSeleccionada.textContent = pcId;
+          confNombreAlumno.textContent = alumnoSesion.nombre;
+          confMatriculaAlumno.textContent = alumnoSesion.matricula;
+          confSoftwareLista.textContent = swSeleccionados.length > 0 ? swSeleccionados.join(', ') : 'Uso general';
+          panelFormReserva.classList.remove('hidden');
+          renderizarSalaCine();
+        });
+      });
+    }
+
+    function renderizarTablaMisReservas() {
+      if (!alumnoSesion) return;
+      const mis = reservas.filter(r => r.matricula === alumnoSesion.matricula);
+      if (mis.length === 0) { tablaMisReservasBody.innerHTML = `<tr><td colspan="5" class="text-center text-gray-400 py-8">No tienes reservaciones.</td></tr>`; return; }
+
+      let html = '';
+      mis.sort((a, b) => b.fecha.localeCompare(a.fecha)).forEach(r => {
+        html += `
+          <tr class="fila-reserva">
+            <td class="py-3 px-4 font-bold text-[var(--upslp-blue)]">${r.pc}</td>
+            <td class="py-3 px-4 text-gray-700">${r.software}</td>
+            <td class="py-3 px-4 text-gray-600">${r.fecha}</td>
+            <td class="py-3 px-4 text-gray-600 font-mono text-xs">${r.bloque}</td>
+            <td class="py-3 px-4 text-center">
+              <button data-id="${r.id}" class="btn-cancelar-alumno bg-rose-100 hover:bg-rose-200 text-rose-700 font-semibold px-3 py-1.5 rounded-xl text-xs"><i class="fas fa-trash-alt mr-1"></i> Cancelar</button>
+            </td>
+          </tr>`;
+      });
+      tablaMisReservasBody.innerHTML = html;
+
+      document.querySelectorAll('.btn-cancelar-alumno').forEach(btn => {
+        btn.addEventListener('click', async function() {
+          const id = this.getAttribute('data-id');
+          await window.firebaseModules.deleteDoc(window.firebaseModules.doc(window.db, "reservas", id));
+          await sincronizarDatosDesdeNube();
+          renderizarTablaMisReservas();
+          renderizarSalaCine();
+        });
+      });
+    }
+
+    function renderizarAdminGridSw() {
+      let html = '';
+      for (let i = 1; i <= 30; i++) {
+        const pcId = `PC${i}`;
+        const currentSws = pcMapaSw[pcId] || [];
+        html += `
+          <div class="bg-slate-50 p-3 rounded-xl border border-gray-200 space-y-2">
+            <div class="flex items-center justify-between"><span class="font-bold text-xs text-[var(--upslp-blue)]">${pcId}</span></div>
+            <div class="max-h-24 overflow-y-auto space-y-1 bg-white p-2 rounded-lg border text-xs">`;
+        SOFTWARE_CATALOGO.forEach(sw => {
+          const checked = currentSws.includes(sw) ? 'checked' : '';
+          html += `<label class="flex items-center gap-1.5 cursor-pointer text-[0.7rem]"><input type="checkbox" value="${sw}" data-pc="${pcId}" class="admin-sw-chk" ${checked}> ${sw}</label>`;
+        });
+        html += `</div></div>`;
+      }
+      adminGridSwContainer.innerHTML = html;
+
+      document.querySelectorAll('.admin-sw-chk').forEach(chk => {
+        chk.addEventListener('change', async function() {
+          const pc = this.getAttribute('data-pc');
+          const sw = this.value;
+          if (!pcMapaSw[pc]) pcMapaSw[pc] = [];
+          if (this.checked) { if (!pcMapaSw[pc].includes(sw)) pcMapaSw[pc].push(sw); }
+          else { pcMapaSw[pc] = pcMapaSw[pc].filter(s => s !== sw); }
+          
+          await window.firebaseModules.setDoc(window.firebaseModules.doc(window.db, "config_pcs", pc), { software: pcMapaSw[pc] });
+        });
+      });
+    }
+
+    function renderizarTablaAdmin() {
+      if (reservas.length === 0) { tablaBody.innerHTML = `<tr><td colspan="7" class="text-center text-gray-400 py-8">No hay registros en la nube.</td></tr>`; totalReservasSpan.textContent = '0'; return; }
+
+      let html = '';
+      reservas.sort((a, b) => b.fecha.localeCompare(a.fecha)).forEach(r => {
+        html += `
+          <tr class="fila-reserva">
+            <td class="py-3 px-4 font-bold text-[var(--upslp-blue)]">${r.pc}</td>
+            <td class="py-3 px-4 font-mono font-bold text-[var(--upslp-orange)]">${r.matricula}</td>
+            <td class="py-3 px-4 font-semibold text-gray-800">${r.nombre}</td>
+            <td class="py-3 px-4 text-gray-700">${r.software}</td>
+            <td class="py-3 px-4 text-gray-600">${r.fecha}</td>
+            <td class="py-3 px-4 text-gray-600 font-mono text-xs">${r.bloque}</td>
+            <td class="py-3 px-4 text-center">
+              <button data-id="${r.id}" class="btn-eliminar-admin bg-rose-100 hover:bg-rose-200 text-rose-800 font-semibold px-3 py-1.5 rounded-xl text-xs"><i class="fas fa-trash-alt mr-1"></i> Eliminar</button>
+            </td>
+          </tr>`;
+      });
+      tablaBody.innerHTML = html;
+      totalReservasSpan.textContent = reservas.length;
+      renderizarAdminGridSw();
+
+      document.querySelectorAll('.btn-eliminar-admin').forEach(btn => {
+        btn.addEventListener('click', async function() {
+          const id = this.getAttribute('data-id');
+          await window.firebaseModules.deleteDoc(window.firebaseModules.doc(window.db, "reservas", id));
+          await sincronizarDatosDesdeNube();
+          renderizarTablaAdmin();
+        });
+      });
+    }
+
+    function cambiarVista(vista) {
+      [vistaSeleccionRol, vistaEstudianteLogin, vistaAdminLogin, vistaAlumno, vistaMisReservas, vistaAdminPanel, vistaQuejas].forEach(v => v.classList.add('hidden'));
+      headerAcciones.innerHTML = '';
+
+      if (vista === 'seleccion') vistaSeleccionRol.classList.remove('hidden');
+      else if (vista === 'estudiante_login') vistaEstudianteLogin.classList.remove('hidden');
+      else if (vista === 'estudiante_sala') {
+        if (!alumnoSesion) { cambiarVista('estudiante_login'); return; }
+        lblAlumnoConectado.textContent = alumnoSesion.nombre;
+        lblMatriculaConectada.textContent = alumnoSesion.matricula;
+        actualizarContadorMisReservas();
+        vistaAlumno.classList.remove('hidden');
+        renderizarSalaCine();
+      } else if (vista === 'mis_reservas') { vistaMisReservas.classList.remove('hidden'); renderizarTablaMisReservas(); }
+      else if (vista === 'admin_login') vistaAdminLogin.classList.remove('hidden');
+      else if (vista === 'admin_panel') {
+        vistaAdminPanel.classList.remove('hidden');
+        localStorage.setItem('upslp_admin_sesion', 'activo');
+        renderizarTablaAdmin();
+        headerAcciones.innerHTML = `<button id="btnSalirAdminHeader" class="text-xs bg-slate-100 hover:bg-slate-200 text-gray-700 font-semibold px-3.5 py-1.5 rounded-full border">Volver inicio</button>`;
+        document.getElementById('btnSalirAdminHeader').addEventListener('click', () => cambiarVista('seleccion'));
+      } else if (vista === 'quejas') vistaQuejas.classList.remove('hidden');
+    }
+
+    // Eventos de Navegación y Formularios
+    btnRolEstudiante.addEventListener('click', () => cambiarVista(alumnoSesion ? 'estudiante_sala' : 'estudiante_login'));
+    btnRolAdmin.addEventListener('click', () => cambiarVista(localStorage.getItem('upslp_admin_sesion') === 'activo' ? 'admin_panel' : 'admin_login'));
+    btnVolverSeleccionEstudiante.addEventListener('click', () => cambiarVista('seleccion'));
+    btnVolverSeleccionAdmin.addEventListener('click', () => cambiarVista('seleccion'));
+
+    estudianteLoginForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      const matricula = estudianteLoginMatricula.value.trim();
+      const nombre = estudianteLoginNombre.value.trim();
+      if (!/^\d{6}$/.test(matricula)) { alert('La matrícula debe tener 6 dígitos.'); return; }
+      alumnoSesion = { matricula, nombre };
+      localStorage.setItem('upslp_alumno_sesion', JSON.stringify(alumnoSesion));
+      estudianteLoginForm.reset();
+      cambiarVista('estudiante_sala');
+    });
+
+    btnCerrarSesionEstudiante.addEventListener('click', () => { localStorage.removeItem('upslp_alumno_sesion'); alumnoSesion = null; cambiarVista('seleccion'); });
+    btnVerMisReservas.addEventListener('click', () => cambiarVista('mis_reservas'));
+    btnVolverDesdeMisReservas.addEventListener('click', () => cambiarVista('estudiante_sala'));
+    btnIrQuejasDesdeAlumno.addEventListener('click', () => cambiarVista('quejas'));
+    btnVolverDesdeQuejas.addEventListener('click', () => cambiarVista(localStorage.getItem('upslp_admin_sesion') === 'activo' ? 'admin_panel' : 'estudiante_sala'));
+
+    filtroFecha.addEventListener('change', renderizarSalaCine);
+    filtroBloque.addEventListener('change', renderizarSalaCine);
+    btnCancelarSeleccionPC.addEventListener('click', () => { pcSeleccionada = null; panelFormReserva.classList.add('hidden'); renderizarSalaCine(); });
+
+    btnConfirmarReservaFinal.addEventListener('click', async function() {
+      const fecha = filtroFecha.value;
+      const bloque = filtroBloque.value;
+      const swSeleccionados = obtenerSoftwareSeleccionados();
+      const softwareStr = swSeleccionados.length > 0 ? swSeleccionados.join(', ') : 'Uso General';
+
+      if (!pcSeleccionada || !fecha || !bloque) return;
+
+      const reservaId = `${fecha}_${bloque}_${pcSeleccionada}`;
+      const nuevaReserva = { id: reservaId, pc: pcSeleccionada, matricula: alumnoSesion.matricula, nombre: alumnoSesion.nombre, software: softwareStr, fecha, bloque };
+
+      try {
+        await window.firebaseModules.setDoc(window.firebaseModules.doc(window.db, "reservas", reservaId), nuevaReserva);
+        await sincronizarDatosDesdeNube();
+
+        feedback.innerHTML = `<div class="bg-emerald-50 border border-emerald-200 text-emerald-900 px-4 py-3 rounded-xl text-xs"><i class="fas fa-check-circle text-emerald-600 mr-1"></i> <b>¡Reservación guardada en la base de datos central!</b></div>`;
+        panelFormReserva.classList.add('hidden');
+        pcSeleccionada = null;
+        renderizarSalaCine();
+      } catch (err) {
+        console.error(err);
+        alert("Error al guardar en Firebase.");
+      }
+    });
+
+    adminLoginForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      if (adminEmailInput.value.trim() === 'usiel11700@gmail.com' && adminPasswordInput.value.trim() === 'UPSLP2026') {
+        adminLoginFeedback.innerHTML = '';
+        adminLoginForm.reset();
+        cambiarVista('admin_panel');
+      } else {
+        adminLoginFeedback.innerHTML = `<span class="text-rose-700 bg-rose-100 px-3 py-2 rounded-xl text-xs">Credenciales incorrectas.</span>`;
+      }
+    });
+
+    btnCerrarSesionAdmin.addEventListener('click', () => { localStorage.removeItem('upslp_admin_sesion'); cambiarVista('seleccion'); });
+
+    // Inicialización de fechas y datos
+    filtroFecha.value = new Date().toISOString().split('T')[0];
+    populateBloques();
+    populateCheckboxesSoftware();
+    await sincronizarDatosDesdeNube();
+
+    if (localStorage.getItem('upslp_admin_sesion') === 'activo') cambiarVista('admin_panel');
+    else if (alumnoSesion) cambiarVista('estudiante_sala');
+    else cambiarVista('seleccion');
+  });
+</script>
+
+</body>
+</html>
