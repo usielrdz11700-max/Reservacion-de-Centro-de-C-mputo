@@ -11,7 +11,7 @@
   <!-- SDKs de Firebase -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, collection, getDocs, setDoc, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, collection, getDocs, setDoc, doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     // CONFIGURA AQUÍ TUS CREDENCIALES DE FIREBASE
     const firebaseConfig = {
@@ -27,7 +27,7 @@
     const db = getFirestore(app);
     
     window.db = db;
-    window.firebaseModules = { collection, getDocs, setDoc, doc, deleteDoc };
+    window.firebaseModules = { collection, getDocs, setDoc, doc, deleteDoc, updateDoc };
     
     // Disparar evento cuando Firebase esté listo
     window.dispatchEvent(new Event('firebase-ready'));
@@ -120,6 +120,30 @@
     @keyframes fadeSlide {
       0% { opacity: 0; transform: translateY(-5px); }
       100% { opacity: 1; transform: translateY(0); }
+    }
+    .estado-completada {
+      background-color: #dcfce7 !important;
+      color: #166534 !important;
+    }
+    .estado-en-uso {
+      background-color: #fef3c7 !important;
+      color: #92400e !important;
+    }
+    .estado-cancelada {
+      background-color: #fee2e2 !important;
+      color: #991b1b !important;
+    }
+    .estado-pendiente {
+      background-color: #e0f2fe !important;
+      color: #0369a1 !important;
+    }
+    .badge-estado {
+      font-size: 0.6rem;
+      padding: 0.15rem 0.6rem;
+      border-radius: 9999px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
     }
   </style>
 </head>
@@ -309,9 +333,9 @@
       <div class="scroll-table border border-[var(--upslp-blue)]/20 rounded-2xl bg-white shadow-sm mb-4">
         <table class="w-full text-sm">
           <thead class="bg-slate-100 sticky top-0 text-xs uppercase text-[var(--upslp-blue)] font-bold">
-            <tr><th class="py-3 px-4">Equipo</th><th class="py-3 px-4">Software</th><th class="py-3 px-4">Fecha</th><th class="py-3 px-4">Bloque</th><th class="py-3 px-4 text-center">Acciones</th></tr>
+            <tr><th class="py-3 px-4">Equipo</th><th class="py-3 px-4">Software</th><th class="py-3 px-4">Fecha</th><th class="py-3 px-4">Bloque</th><th class="py-3 px-4 text-center">Estado</th><th class="py-3 px-4 text-center">Acciones</th></tr>
           </thead>
-          <tbody id="tablaMisReservasBody"><tr><td colspan="5" class="text-center text-gray-400 py-8">Cargando...</td></tr></tbody>
+          <tbody id="tablaMisReservasBody"><tr><td colspan="6" class="text-center text-gray-400 py-8">Cargando...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -331,21 +355,77 @@
         </div>
       </div>
 
-      <div class="scroll-table border border-[var(--upslp-blue)]/20 rounded-2xl bg-white/90 shadow-sm mb-6">
-        <table class="w-full text-sm">
-          <thead class="bg-slate-100 sticky top-0 text-xs uppercase text-[var(--upslp-blue)] font-bold">
-            <tr><th class="py-3 px-4">Equipo</th><th class="py-3 px-4">Matrícula</th><th class="py-3 px-4">Alumno</th><th class="py-3 px-4">Software Usado</th><th class="py-3 px-4">Fecha</th><th class="py-3 px-4">Bloque</th><th class="py-3 px-4 text-center">Acciones</th></tr>
-          </thead>
-          <tbody id="tablaReservasBody"><tr><td colspan="7" class="text-center text-gray-400 py-8">Cargando registros...</td></tr></tbody>
-        </table>
+      <!-- Pestañas de navegación en el panel admin -->
+      <div class="flex border-b border-gray-200 mb-4">
+        <button id="tabReservasActivas" class="px-4 py-2 text-sm font-semibold text-[var(--upslp-blue)] border-b-2 border-[var(--upslp-orange)] transition-all">
+          <i class="fas fa-list mr-1"></i> Todas las Reservas
+        </button>
+        <button id="tabSeguimientoReservas" class="px-4 py-2 text-sm font-semibold text-gray-500 hover:text-gray-700 border-b-2 border-transparent hover:border-gray-300 transition-all">
+          <i class="fas fa-clipboard-list mr-1"></i> Seguimiento de Reservas
+        </button>
+        <button id="tabSoftwareAdmin" class="px-4 py-2 text-sm font-semibold text-gray-500 hover:text-gray-700 border-b-2 border-transparent hover:border-gray-300 transition-all">
+          <i class="fas fa-cogs mr-1"></i> Software por PC
+        </button>
       </div>
 
-      <div>
-        <div class="flex items-center gap-2 mb-3">
-          <i class="fas fa-cogs text-[var(--upslp-orange)]"></i>
-          <span class="text-sm font-bold text-gray-700">Administrar Software Instalado por Computadora (Sincronizado)</span>
+      <!-- Contenido de pestañas -->
+      <div id="contenidoAdmin">
+        <!-- TAB 1: Reservas Activas -->
+        <div id="tabReservasActivasContent">
+          <div class="scroll-table border border-[var(--upslp-blue)]/20 rounded-2xl bg-white/90 shadow-sm mb-6">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-100 sticky top-0 text-xs uppercase text-[var(--upslp-blue)] font-bold">
+                <tr><th class="py-3 px-4">Equipo</th><th class="py-3 px-4">Matrícula</th><th class="py-3 px-4">Alumno</th><th class="py-3 px-4">Software Usado</th><th class="py-3 px-4">Fecha</th><th class="py-3 px-4">Bloque</th><th class="py-3 px-4 text-center">Estado</th><th class="py-3 px-4 text-center">Acciones</th></tr>
+              </thead>
+              <tbody id="tablaReservasBody"><tr><td colspan="8" class="text-center text-gray-400 py-8">Cargando registros...</td></tr></tbody>
+            </table>
+          </div>
         </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-h-96 overflow-y-auto bg-white/80 p-4 rounded-2xl border border-[var(--upslp-blue)]/10" id="adminGridSwContainer"></div>
+
+        <!-- TAB 2: Seguimiento de Reservas (NUEVO) -->
+        <div id="tabSeguimientoReservasContent" class="hidden">
+          <div class="flex flex-wrap items-center gap-3 mb-4">
+            <div class="flex items-center gap-2">
+              <label class="text-xs font-semibold text-gray-600">Filtrar por estado:</label>
+              <select id="filtroEstadoSeguimiento" class="select-clean text-sm rounded-xl border border-gray-300 bg-white px-3 py-1.5">
+                <option value="todos">Todos</option>
+                <option value="pendiente">Pendiente</option>
+                <option value="en_uso">En Uso</option>
+                <option value="completada">Completada</option>
+                <option value="cancelada">Cancelada</option>
+              </select>
+            </div>
+            <div class="flex gap-2 ml-auto">
+              <span class="badge-estado bg-blue-100 text-blue-800">Pendiente</span>
+              <span class="badge-estado bg-yellow-100 text-yellow-800">En Uso</span>
+              <span class="badge-estado bg-green-100 text-green-800">Completada</span>
+              <span class="badge-estado bg-red-100 text-red-800">Cancelada</span>
+            </div>
+          </div>
+          <div class="scroll-table border border-[var(--upslp-blue)]/20 rounded-2xl bg-white/90 shadow-sm mb-4">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-100 sticky top-0 text-xs uppercase text-[var(--upslp-blue)] font-bold">
+                <tr><th class="py-3 px-4">Equipo</th><th class="py-3 px-4">Matrícula</th><th class="py-3 px-4">Alumno</th><th class="py-3 px-4">Fecha</th><th class="py-3 px-4">Bloque</th><th class="py-3 px-4 text-center">Estado</th><th class="py-3 px-4 text-center">Cambiar Estado</th></tr>
+              </thead>
+              <tbody id="tablaSeguimientoBody"><tr><td colspan="7" class="text-center text-gray-400 py-8">Cargando registros...</td></tr></tbody>
+            </table>
+          </div>
+          <div class="text-xs text-gray-500 text-center">
+            <i class="fas fa-info-circle mr-1"></i> Los estados permiten dar seguimiento a cada reservación. 
+            <span class="font-semibold">Pendiente</span> → <span class="font-semibold">En Uso</span> → <span class="font-semibold">Completada</span> o <span class="font-semibold">Cancelada</span>
+          </div>
+        </div>
+
+        <!-- TAB 3: Software por PC -->
+        <div id="tabSoftwareAdminContent" class="hidden">
+          <div>
+            <div class="flex items-center gap-2 mb-3">
+              <i class="fas fa-cogs text-[var(--upslp-orange)]"></i>
+              <span class="text-sm font-bold text-gray-700">Administrar Software Instalado por Computadora (Sincronizado)</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 max-h-96 overflow-y-auto bg-white/80 p-4 rounded-2xl border border-[var(--upslp-blue)]/10" id="adminGridSwContainer"></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -380,10 +460,32 @@
       'Visual Studio Code', 'Java/Eclipse', 'LabVIEW', 'Revit', 'Packet Tracer', 'SPSS'
     ];
 
+    const ESTADOS = {
+      PENDIENTE: 'pendiente',
+      EN_USO: 'en_uso',
+      COMPLETADA: 'completada',
+      CANCELADA: 'cancelada'
+    };
+
+    const ESTADO_LABELS = {
+      [ESTADOS.PENDIENTE]: 'Pendiente',
+      [ESTADOS.EN_USO]: 'En Uso',
+      [ESTADOS.COMPLETADA]: 'Completada',
+      [ESTADOS.CANCELADA]: 'Cancelada'
+    };
+
+    const ESTADO_COLORS = {
+      [ESTADOS.PENDIENTE]: 'bg-blue-100 text-blue-800',
+      [ESTADOS.EN_USO]: 'bg-yellow-100 text-yellow-800',
+      [ESTADOS.COMPLETADA]: 'bg-green-100 text-green-800',
+      [ESTADOS.CANCELADA]: 'bg-red-100 text-red-800'
+    };
+
     let pcMapaSw = {};
     let reservas = [];
     let alumnoSesion = JSON.parse(localStorage.getItem('upslp_alumno_sesion') || 'null');
     let pcSeleccionada = null;
+    let currentTab = 'reservas_activas';
 
     // Elementos DOM
     const vistaSeleccionRol = document.getElementById('vistaSeleccionRol');
@@ -415,6 +517,16 @@
     const adminEmailInput = document.getElementById('adminEmail');
     const adminPasswordInput = document.getElementById('adminPassword');
     const adminLoginFeedback = document.getElementById('adminLoginFeedback');
+
+    // Nuevos elementos para el seguimiento
+    const tabReservasActivas = document.getElementById('tabReservasActivas');
+    const tabSeguimientoReservas = document.getElementById('tabSeguimientoReservas');
+    const tabSoftwareAdmin = document.getElementById('tabSoftwareAdmin');
+    const tabReservasActivasContent = document.getElementById('tabReservasActivasContent');
+    const tabSeguimientoReservasContent = document.getElementById('tabSeguimientoReservasContent');
+    const tabSoftwareAdminContent = document.getElementById('tabSoftwareAdminContent');
+    const tablaSeguimientoBody = document.getElementById('tablaSeguimientoBody');
+    const filtroEstadoSeguimiento = document.getElementById('filtroEstadoSeguimiento');
 
     const filtroFecha = document.getElementById('filtroFecha');
     const errorDiaSemana = document.getElementById('errorDiaSemana');
@@ -491,13 +603,22 @@
             await setDoc(doc(window.db, "config_pcs", pcId), { software: sws });
           }
         } else {
-          snapPcs.forEach(d => { pcMapaSw[d.id] = d.data().software; });
+          snapPcs.forEach(d => { 
+            pcMapaSw[d.id] = d.data().software || []; 
+          });
         }
 
-        // Cargar Reservas globales de la nube
+        // Cargar Reservas globales de la nube con estado
         const snapReservas = await getDocs(collection(window.db, "reservas"));
         reservas = [];
-        snapReservas.forEach(d => { reservas.push(d.data()); });
+        snapReservas.forEach(d => { 
+          const data = d.data();
+          // Asegurar que cada reserva tenga un estado, si no, asignar PENDIENTE por defecto
+          if (!data.estado) {
+            data.estado = ESTADOS.PENDIENTE;
+          }
+          reservas.push(data); 
+        });
 
         actualizarContadorMisReservas();
       } catch (e) {
@@ -539,7 +660,7 @@
       for (let i = 1; i <= 30; i++) {
         const pcId = `PC${i}`;
         const swsPC = pcMapaSw[pcId] || [];
-        const ocupada = reservas.some(r => r.pc === pcId && r.fecha === fecha && r.bloque === bloque);
+        const ocupada = reservas.some(r => r.pc === pcId && r.fecha === fecha && r.bloque === bloque && r.estado !== ESTADOS.CANCELADA && r.estado !== ESTADOS.COMPLETADA);
         const cubreSoftware = swSeleccionados.every(swReq => swsPC.includes(swReq));
 
         let estadoClase = 'bg-white border-2 border-gray-300 text-gray-700';
@@ -581,18 +702,22 @@
     function renderizarTablaMisReservas() {
       if (!alumnoSesion) return;
       const mis = reservas.filter(r => r.matricula === alumnoSesion.matricula);
-      if (mis.length === 0) { tablaMisReservasBody.innerHTML = `<tr><td colspan="5" class="text-center text-gray-400 py-8">No tienes reservaciones.</td></tr>`; return; }
+      if (mis.length === 0) { tablaMisReservasBody.innerHTML = `<tr><td colspan="6" class="text-center text-gray-400 py-8">No tienes reservaciones.</td></tr>`; return; }
 
       let html = '';
       mis.sort((a, b) => b.fecha.localeCompare(a.fecha)).forEach(r => {
+        const estadoLabel = ESTADO_LABELS[r.estado] || 'Pendiente';
+        const estadoColor = ESTADO_COLORS[r.estado] || ESTADO_COLORS[ESTADOS.PENDIENTE];
+        const puedeCancelar = r.estado === ESTADOS.PENDIENTE || r.estado === ESTADOS.EN_USO;
         html += `
           <tr class="fila-reserva">
             <td class="py-3 px-4 font-bold text-[var(--upslp-blue)]">${r.pc}</td>
             <td class="py-3 px-4 text-gray-700">${r.software}</td>
             <td class="py-3 px-4 text-gray-600">${r.fecha}</td>
             <td class="py-3 px-4 text-gray-600 font-mono text-xs">${r.bloque}</td>
+            <td class="py-3 px-4 text-center"><span class="badge-estado ${estadoColor}">${estadoLabel}</span></td>
             <td class="py-3 px-4 text-center">
-              <button data-id="${r.id}" class="btn-cancelar-alumno bg-rose-100 hover:bg-rose-200 text-rose-700 font-semibold px-3 py-1.5 rounded-xl text-xs"><i class="fas fa-trash-alt mr-1"></i> Cancelar</button>
+              ${puedeCancelar ? `<button data-id="${r.id}" class="btn-cancelar-alumno bg-rose-100 hover:bg-rose-200 text-rose-700 font-semibold px-3 py-1.5 rounded-xl text-xs"><i class="fas fa-trash-alt mr-1"></i> Cancelar</button>` : '<span class="text-xs text-gray-400">No disponible</span>'}
             </td>
           </tr>`;
       });
@@ -601,10 +726,15 @@
       document.querySelectorAll('.btn-cancelar-alumno').forEach(btn => {
         btn.addEventListener('click', async function() {
           const id = this.getAttribute('data-id');
-          await window.firebaseModules.deleteDoc(window.firebaseModules.doc(window.db, "reservas", id));
-          await sincronizarDatosDesdeNube();
-          renderizarTablaMisReservas();
-          renderizarSalaCine();
+          if (confirm('¿Estás seguro de cancelar esta reservación?')) {
+            // En lugar de eliminar, actualizamos el estado a CANCELADA
+            await window.firebaseModules.updateDoc(window.firebaseModules.doc(window.db, "reservas", id), { 
+              estado: ESTADOS.CANCELADA 
+            });
+            await sincronizarDatosDesdeNube();
+            renderizarTablaMisReservas();
+            renderizarSalaCine();
+          }
         });
       });
     }
@@ -640,10 +770,16 @@
     }
 
     function renderizarTablaAdmin() {
-      if (reservas.length === 0) { tablaBody.innerHTML = `<tr><td colspan="7" class="text-center text-gray-400 py-8">No hay registros en la nube.</td></tr>`; totalReservasSpan.textContent = '0'; return; }
+      if (reservas.length === 0) { 
+        tablaBody.innerHTML = `<tr><td colspan="8" class="text-center text-gray-400 py-8">No hay registros en la nube.</td></tr>`; 
+        totalReservasSpan.textContent = '0'; 
+        return; 
+      }
 
       let html = '';
       reservas.sort((a, b) => b.fecha.localeCompare(a.fecha)).forEach(r => {
+        const estadoLabel = ESTADO_LABELS[r.estado] || 'Pendiente';
+        const estadoColor = ESTADO_COLORS[r.estado] || ESTADO_COLORS[ESTADOS.PENDIENTE];
         html += `
           <tr class="fila-reserva">
             <td class="py-3 px-4 font-bold text-[var(--upslp-blue)]">${r.pc}</td>
@@ -652,6 +788,7 @@
             <td class="py-3 px-4 text-gray-700">${r.software}</td>
             <td class="py-3 px-4 text-gray-600">${r.fecha}</td>
             <td class="py-3 px-4 text-gray-600 font-mono text-xs">${r.bloque}</td>
+            <td class="py-3 px-4 text-center"><span class="badge-estado ${estadoColor}">${estadoLabel}</span></td>
             <td class="py-3 px-4 text-center">
               <button data-id="${r.id}" class="btn-eliminar-admin bg-rose-100 hover:bg-rose-200 text-rose-800 font-semibold px-3 py-1.5 rounded-xl text-xs"><i class="fas fa-trash-alt mr-1"></i> Eliminar</button>
             </td>
@@ -659,14 +796,69 @@
       });
       tablaBody.innerHTML = html;
       totalReservasSpan.textContent = reservas.length;
-      renderizarAdminGridSw();
+    }
 
-      document.querySelectorAll('.btn-eliminar-admin').forEach(btn => {
-        btn.addEventListener('click', async function() {
+    function renderizarTablaSeguimiento() {
+      const filtroEstado = filtroEstadoSeguimiento.value;
+      let reservasFiltradas = reservas;
+      
+      if (filtroEstado !== 'todos') {
+        reservasFiltradas = reservas.filter(r => r.estado === filtroEstado);
+      }
+
+      if (reservasFiltradas.length === 0) { 
+        tablaSeguimientoBody.innerHTML = `<tr><td colspan="7" class="text-center text-gray-400 py-8">No hay reservaciones para mostrar.</td></tr>`; 
+        return; 
+      }
+
+      let html = '';
+      reservasFiltradas.sort((a, b) => b.fecha.localeCompare(a.fecha)).forEach(r => {
+        const estadoLabel = ESTADO_LABELS[r.estado] || 'Pendiente';
+        const estadoColor = ESTADO_COLORS[r.estado] || ESTADO_COLORS[ESTADOS.PENDIENTE];
+        
+        // Opciones de cambio de estado (excluyendo el estado actual)
+        const opcionesEstado = Object.entries(ESTADO_LABELS)
+          .filter(([key]) => key !== r.estado)
+          .map(([key, label]) => `<option value="${key}">${label}</option>`)
+          .join('');
+
+        html += `
+          <tr class="fila-reserva">
+            <td class="py-3 px-4 font-bold text-[var(--upslp-blue)]">${r.pc}</td>
+            <td class="py-3 px-4 font-mono font-bold text-[var(--upslp-orange)]">${r.matricula}</td>
+            <td class="py-3 px-4 font-semibold text-gray-800">${r.nombre}</td>
+            <td class="py-3 px-4 text-gray-600">${r.fecha}</td>
+            <td class="py-3 px-4 text-gray-600 font-mono text-xs">${r.bloque}</td>
+            <td class="py-3 px-4 text-center"><span class="badge-estado ${estadoColor}">${estadoLabel}</span></td>
+            <td class="py-3 px-4 text-center">
+              <select class="cambio-estado-select text-xs rounded-lg border border-gray-300 bg-white px-2 py-1.5 pr-8" data-id="${r.id}">
+                <option value="">Cambiar a...</option>
+                ${opcionesEstado}
+              </select>
+            </td>
+          </tr>`;
+      });
+      tablaSeguimientoBody.innerHTML = html;
+
+      document.querySelectorAll('.cambio-estado-select').forEach(select => {
+        select.addEventListener('change', async function() {
           const id = this.getAttribute('data-id');
-          await window.firebaseModules.deleteDoc(window.firebaseModules.doc(window.db, "reservas", id));
-          await sincronizarDatosDesdeNube();
-          renderizarTablaAdmin();
+          const nuevoEstado = this.value;
+          if (!nuevoEstado) return;
+          
+          try {
+            await window.firebaseModules.updateDoc(
+              window.firebaseModules.doc(window.db, "reservas", id), 
+              { estado: nuevoEstado }
+            );
+            await sincronizarDatosDesdeNube();
+            renderizarTablaSeguimiento();
+            renderizarTablaAdmin();
+          } catch (err) {
+            console.error("Error al actualizar estado:", err);
+            alert("Error al actualizar el estado de la reserva.");
+          }
+          this.value = '';
         });
       });
     }
@@ -690,9 +882,44 @@
         vistaAdminPanel.classList.remove('hidden');
         localStorage.setItem('upslp_admin_sesion', 'activo');
         renderizarTablaAdmin();
+        renderizarTablaSeguimiento();
+        renderizarAdminGridSw();
         headerAcciones.innerHTML = `<button id="btnSalirAdminHeader" class="text-xs bg-slate-100 hover:bg-slate-200 text-gray-700 font-semibold px-3.5 py-1.5 rounded-full border">Volver inicio</button>`;
         document.getElementById('btnSalirAdminHeader').addEventListener('click', () => cambiarVista('seleccion'));
+        // Mostrar tab por defecto
+        cambiarTabAdmin('reservas_activas');
       } else if (vista === 'quejas') vistaQuejas.classList.remove('hidden');
+    }
+
+    function cambiarTabAdmin(tab) {
+      currentTab = tab;
+      // Ocultar todos los contenidos
+      tabReservasActivasContent.classList.add('hidden');
+      tabSeguimientoReservasContent.classList.add('hidden');
+      tabSoftwareAdminContent.classList.add('hidden');
+      
+      // Resetear estilos de pestañas
+      [tabReservasActivas, tabSeguimientoReservas, tabSoftwareAdmin].forEach(t => {
+        t.classList.remove('border-[var(--upslp-orange)]', 'text-[var(--upslp-blue)]');
+        t.classList.add('text-gray-500', 'border-transparent');
+      });
+
+      if (tab === 'reservas_activas') {
+        tabReservasActivasContent.classList.remove('hidden');
+        tabReservasActivas.classList.add('border-[var(--upslp-orange)]', 'text-[var(--upslp-blue)]');
+        tabReservasActivas.classList.remove('text-gray-500', 'border-transparent');
+        renderizarTablaAdmin();
+      } else if (tab === 'seguimiento') {
+        tabSeguimientoReservasContent.classList.remove('hidden');
+        tabSeguimientoReservas.classList.add('border-[var(--upslp-orange)]', 'text-[var(--upslp-blue)]');
+        tabSeguimientoReservas.classList.remove('text-gray-500', 'border-transparent');
+        renderizarTablaSeguimiento();
+      } else if (tab === 'software') {
+        tabSoftwareAdminContent.classList.remove('hidden');
+        tabSoftwareAdmin.classList.add('border-[var(--upslp-orange)]', 'text-[var(--upslp-blue)]');
+        tabSoftwareAdmin.classList.remove('text-gray-500', 'border-transparent');
+        renderizarAdminGridSw();
+      }
     }
 
     // Eventos de Navegación y Formularios
@@ -718,6 +945,14 @@
     btnIrQuejasDesdeAlumno.addEventListener('click', () => cambiarVista('quejas'));
     btnVolverDesdeQuejas.addEventListener('click', () => cambiarVista(localStorage.getItem('upslp_admin_sesion') === 'activo' ? 'admin_panel' : 'estudiante_sala'));
 
+    // Eventos de pestañas del admin
+    tabReservasActivas.addEventListener('click', () => cambiarTabAdmin('reservas_activas'));
+    tabSeguimientoReservas.addEventListener('click', () => cambiarTabAdmin('seguimiento'));
+    tabSoftwareAdmin.addEventListener('click', () => cambiarTabAdmin('software'));
+
+    // Filtro de estado en seguimiento
+    filtroEstadoSeguimiento.addEventListener('change', renderizarTablaSeguimiento);
+
     filtroFecha.addEventListener('change', renderizarSalaCine);
     filtroBloque.addEventListener('change', renderizarSalaCine);
     btnCancelarSeleccionPC.addEventListener('click', () => { pcSeleccionada = null; panelFormReserva.classList.add('hidden'); renderizarSalaCine(); });
@@ -731,7 +966,16 @@
       if (!pcSeleccionada || !fecha || !bloque) return;
 
       const reservaId = `${fecha}_${bloque}_${pcSeleccionada}`;
-      const nuevaReserva = { id: reservaId, pc: pcSeleccionada, matricula: alumnoSesion.matricula, nombre: alumnoSesion.nombre, software: softwareStr, fecha, bloque };
+      const nuevaReserva = { 
+        id: reservaId, 
+        pc: pcSeleccionada, 
+        matricula: alumnoSesion.matricula, 
+        nombre: alumnoSesion.nombre, 
+        software: softwareStr, 
+        fecha, 
+        bloque,
+        estado: ESTADOS.PENDIENTE // Estado inicial
+      };
 
       try {
         await window.firebaseModules.setDoc(window.firebaseModules.doc(window.db, "reservas", reservaId), nuevaReserva);
