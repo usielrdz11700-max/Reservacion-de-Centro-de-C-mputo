@@ -11,7 +11,7 @@
   <!-- SDKs de Firebase -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, collection, getDocs, setDoc, doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, collection, getDocs, setDoc, doc, deleteDoc, updateDoc, query, where } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     // CONFIGURA AQUÍ TUS CREDENCIALES DE FIREBASE
     const firebaseConfig = {
@@ -27,7 +27,7 @@
     const db = getFirestore(app);
     
     window.db = db;
-    window.firebaseModules = { collection, getDocs, setDoc, doc, deleteDoc, updateDoc };
+    window.firebaseModules = { collection, getDocs, setDoc, doc, deleteDoc, updateDoc, query, where };
     
     // Disparar evento cuando Firebase esté listo
     window.dispatchEvent(new Event('firebase-ready'));
@@ -121,22 +121,6 @@
       0% { opacity: 0; transform: translateY(-5px); }
       100% { opacity: 1; transform: translateY(0); }
     }
-    .estado-completada {
-      background-color: #dcfce7 !important;
-      color: #166534 !important;
-    }
-    .estado-en-uso {
-      background-color: #fef3c7 !important;
-      color: #92400e !important;
-    }
-    .estado-cancelada {
-      background-color: #fee2e2 !important;
-      color: #991b1b !important;
-    }
-    .estado-pendiente {
-      background-color: #e0f2fe !important;
-      color: #0369a1 !important;
-    }
     .badge-estado {
       font-size: 0.6rem;
       padding: 0.15rem 0.6rem;
@@ -145,6 +129,11 @@
       text-transform: uppercase;
       letter-spacing: 0.03em;
     }
+    .badge-pendiente { background-color: #dbeafe; color: #1e40af; }
+    .badge-en-uso { background-color: #fef3c7; color: #92400e; }
+    .badge-completada { background-color: #dcfce7; color: #166534; }
+    .badge-cancelada { background-color: #fee2e2; color: #991b1b; }
+    .badge-expirada { background-color: #f3e8ff; color: #6b21a8; }
   </style>
 </head>
 <body>
@@ -382,7 +371,7 @@
           </div>
         </div>
 
-        <!-- TAB 2: Seguimiento de Reservas (NUEVO) -->
+        <!-- TAB 2: Seguimiento de Reservas -->
         <div id="tabSeguimientoReservasContent" class="hidden">
           <div class="flex flex-wrap items-center gap-3 mb-4">
             <div class="flex items-center gap-2">
@@ -396,10 +385,10 @@
               </select>
             </div>
             <div class="flex gap-2 ml-auto">
-              <span class="badge-estado bg-blue-100 text-blue-800">Pendiente</span>
-              <span class="badge-estado bg-yellow-100 text-yellow-800">En Uso</span>
-              <span class="badge-estado bg-green-100 text-green-800">Completada</span>
-              <span class="badge-estado bg-red-100 text-red-800">Cancelada</span>
+              <span class="badge-estado badge-pendiente">Pendiente</span>
+              <span class="badge-estado badge-en-uso">En Uso</span>
+              <span class="badge-estado badge-completada">Completada</span>
+              <span class="badge-estado badge-cancelada">Cancelada</span>
             </div>
           </div>
           <div class="scroll-table border border-[var(--upslp-blue)]/20 rounded-2xl bg-white/90 shadow-sm mb-4">
@@ -411,8 +400,9 @@
             </table>
           </div>
           <div class="text-xs text-gray-500 text-center">
-            <i class="fas fa-info-circle mr-1"></i> Los estados permiten dar seguimiento a cada reservación. 
-            <span class="font-semibold">Pendiente</span> → <span class="font-semibold">En Uso</span> → <span class="font-semibold">Completada</span> o <span class="font-semibold">Cancelada</span>
+            <i class="fas fa-info-circle mr-1"></i> Los estados se actualizan automáticamente. 
+            <span class="font-semibold text-blue-600">Pendiente</span> → <span class="font-semibold text-yellow-600">En Uso</span> → <span class="font-semibold text-green-600">Completada</span> 
+            (automático cuando la hora de reserva pasa) o <span class="font-semibold text-red-600">Cancelada</span> (por el estudiante)
           </div>
         </div>
 
@@ -467,18 +457,18 @@
       CANCELADA: 'cancelada'
     };
 
+    const ESTADO_CLASSES = {
+      [ESTADOS.PENDIENTE]: 'badge-pendiente',
+      [ESTADOS.EN_USO]: 'badge-en-uso',
+      [ESTADOS.COMPLETADA]: 'badge-completada',
+      [ESTADOS.CANCELADA]: 'badge-cancelada'
+    };
+
     const ESTADO_LABELS = {
       [ESTADOS.PENDIENTE]: 'Pendiente',
       [ESTADOS.EN_USO]: 'En Uso',
       [ESTADOS.COMPLETADA]: 'Completada',
       [ESTADOS.CANCELADA]: 'Cancelada'
-    };
-
-    const ESTADO_COLORS = {
-      [ESTADOS.PENDIENTE]: 'bg-blue-100 text-blue-800',
-      [ESTADOS.EN_USO]: 'bg-yellow-100 text-yellow-800',
-      [ESTADOS.COMPLETADA]: 'bg-green-100 text-green-800',
-      [ESTADOS.CANCELADA]: 'bg-red-100 text-red-800'
     };
 
     let pcMapaSw = {};
@@ -518,7 +508,6 @@
     const adminPasswordInput = document.getElementById('adminPassword');
     const adminLoginFeedback = document.getElementById('adminLoginFeedback');
 
-    // Nuevos elementos para el seguimiento
     const tabReservasActivas = document.getElementById('tabReservasActivas');
     const tabSeguimientoReservas = document.getElementById('tabSeguimientoReservas');
     const tabSoftwareAdmin = document.getElementById('tabSoftwareAdmin');
@@ -589,6 +578,70 @@
       return Array.from(document.querySelectorAll('.checkbox-sw:checked')).map(c => c.value);
     }
 
+    // ============ FUNCIÓN PARA ACTUALIZAR ESTADOS AUTOMÁTICAMENTE ============
+    async function actualizarEstadosAutomaticamente() {
+      const ahora = new Date();
+      const fechaActual = ahora.toISOString().split('T')[0];
+      const horaActual = ahora.getHours();
+      const minutoActual = ahora.getMinutes();
+      const horaActualStr = `${horaActual.toString().padStart(2, '0')}:${minutoActual.toString().padStart(2, '0')}`;
+
+      let cambiosRealizados = false;
+
+      for (const reserva of reservas) {
+        // Solo procesar reservas que están PENDIENTES o EN_USO
+        if (reserva.estado === ESTADOS.PENDIENTE || reserva.estado === ESTADOS.EN_USO) {
+          // Extraer hora de inicio del bloque (ej: "11:00 - 12:00" -> "11:00")
+          const horaInicio = reserva.bloque.split(' - ')[0];
+          const horaFin = reserva.bloque.split(' - ')[1];
+          
+          // Si la fecha de la reserva es menor a la fecha actual, o es la misma fecha pero la hora ya pasó
+          if (reserva.fecha < fechaActual || 
+              (reserva.fecha === fechaActual && horaFin < horaActualStr)) {
+            // Actualizar a COMPLETADA
+            try {
+              await window.firebaseModules.updateDoc(
+                window.firebaseModules.doc(window.db, "reservas", reserva.id), 
+                { estado: ESTADOS.COMPLETADA }
+              );
+              reserva.estado = ESTADOS.COMPLETADA;
+              cambiosRealizados = true;
+              console.log(`✅ Reserva ${reserva.id} actualizada a COMPLETADA automáticamente`);
+            } catch (err) {
+              console.error(`Error al actualizar reserva ${reserva.id}:`, err);
+            }
+          }
+        }
+      }
+
+      if (cambiosRealizados) {
+        // Recargar datos para reflejar los cambios
+        await sincronizarDatosDesdeNube();
+        // Actualizar todas las vistas
+        renderizarTablaAdmin();
+        renderizarTablaSeguimiento();
+        renderizarTablaMisReservas();
+        renderizarSalaCine();
+      }
+    }
+
+    // ============ FUNCIÓN PARA VERIFICAR RESERVAS CADA MINUTO ============
+    let intervaloActualizacion = null;
+
+    function iniciarVerificacionAutomatica() {
+      // Limpiar intervalo anterior si existe
+      if (intervaloActualizacion) {
+        clearInterval(intervaloActualizacion);
+      }
+      
+      // Verificar cada 30 segundos
+      intervaloActualizacion = setInterval(() => {
+        actualizarEstadosAutomaticamente();
+      }, 30000); // 30 segundos
+      
+      console.log("⏰ Sistema de verificación automática iniciado (cada 30 segundos)");
+    }
+
     async function sincronizarDatosDesdeNube() {
       try {
         const { collection, getDocs, setDoc, doc } = window.firebaseModules;
@@ -608,17 +661,20 @@
           });
         }
 
-        // Cargar Reservas globales de la nube con estado
+        // Cargar Reservas globales de la nube
         const snapReservas = await getDocs(collection(window.db, "reservas"));
         reservas = [];
         snapReservas.forEach(d => { 
           const data = d.data();
-          // Asegurar que cada reserva tenga un estado, si no, asignar PENDIENTE por defecto
+          // Asegurar que cada reserva tenga un estado
           if (!data.estado) {
             data.estado = ESTADOS.PENDIENTE;
           }
           reservas.push(data); 
         });
+
+        // Después de cargar, ejecutar verificación automática
+        await actualizarEstadosAutomaticamente();
 
         actualizarContadorMisReservas();
       } catch (e) {
@@ -660,7 +716,13 @@
       for (let i = 1; i <= 30; i++) {
         const pcId = `PC${i}`;
         const swsPC = pcMapaSw[pcId] || [];
-        const ocupada = reservas.some(r => r.pc === pcId && r.fecha === fecha && r.bloque === bloque && r.estado !== ESTADOS.CANCELADA && r.estado !== ESTADOS.COMPLETADA);
+        // Solo considerar ocupadas si están PENDIENTES o EN_USO
+        const ocupada = reservas.some(r => 
+          r.pc === pcId && 
+          r.fecha === fecha && 
+          r.bloque === bloque && 
+          (r.estado === ESTADOS.PENDIENTE || r.estado === ESTADOS.EN_USO)
+        );
         const cubreSoftware = swSeleccionados.every(swReq => swsPC.includes(swReq));
 
         let estadoClase = 'bg-white border-2 border-gray-300 text-gray-700';
@@ -707,7 +769,8 @@
       let html = '';
       mis.sort((a, b) => b.fecha.localeCompare(a.fecha)).forEach(r => {
         const estadoLabel = ESTADO_LABELS[r.estado] || 'Pendiente';
-        const estadoColor = ESTADO_COLORS[r.estado] || ESTADO_COLORS[ESTADOS.PENDIENTE];
+        const estadoClass = ESTADO_CLASSES[r.estado] || 'badge-pendiente';
+        // Solo puede cancelar si está PENDIENTE o EN_USO
         const puedeCancelar = r.estado === ESTADOS.PENDIENTE || r.estado === ESTADOS.EN_USO;
         html += `
           <tr class="fila-reserva">
@@ -715,7 +778,7 @@
             <td class="py-3 px-4 text-gray-700">${r.software}</td>
             <td class="py-3 px-4 text-gray-600">${r.fecha}</td>
             <td class="py-3 px-4 text-gray-600 font-mono text-xs">${r.bloque}</td>
-            <td class="py-3 px-4 text-center"><span class="badge-estado ${estadoColor}">${estadoLabel}</span></td>
+            <td class="py-3 px-4 text-center"><span class="badge-estado ${estadoClass}">${estadoLabel}</span></td>
             <td class="py-3 px-4 text-center">
               ${puedeCancelar ? `<button data-id="${r.id}" class="btn-cancelar-alumno bg-rose-100 hover:bg-rose-200 text-rose-700 font-semibold px-3 py-1.5 rounded-xl text-xs"><i class="fas fa-trash-alt mr-1"></i> Cancelar</button>` : '<span class="text-xs text-gray-400">No disponible</span>'}
             </td>
@@ -727,13 +790,21 @@
         btn.addEventListener('click', async function() {
           const id = this.getAttribute('data-id');
           if (confirm('¿Estás seguro de cancelar esta reservación?')) {
-            // En lugar de eliminar, actualizamos el estado a CANCELADA
-            await window.firebaseModules.updateDoc(window.firebaseModules.doc(window.db, "reservas", id), { 
-              estado: ESTADOS.CANCELADA 
-            });
-            await sincronizarDatosDesdeNube();
-            renderizarTablaMisReservas();
-            renderizarSalaCine();
+            // Actualizar estado a CANCELADA (no eliminar)
+            try {
+              await window.firebaseModules.updateDoc(
+                window.firebaseModules.doc(window.db, "reservas", id), 
+                { estado: ESTADOS.CANCELADA }
+              );
+              await sincronizarDatosDesdeNube();
+              renderizarTablaMisReservas();
+              renderizarSalaCine();
+              renderizarTablaAdmin();
+              renderizarTablaSeguimiento();
+            } catch (err) {
+              console.error("Error al cancelar reserva:", err);
+              alert("Error al cancelar la reserva.");
+            }
           }
         });
       });
@@ -779,7 +850,7 @@
       let html = '';
       reservas.sort((a, b) => b.fecha.localeCompare(a.fecha)).forEach(r => {
         const estadoLabel = ESTADO_LABELS[r.estado] || 'Pendiente';
-        const estadoColor = ESTADO_COLORS[r.estado] || ESTADO_COLORS[ESTADOS.PENDIENTE];
+        const estadoClass = ESTADO_CLASSES[r.estado] || 'badge-pendiente';
         html += `
           <tr class="fila-reserva">
             <td class="py-3 px-4 font-bold text-[var(--upslp-blue)]">${r.pc}</td>
@@ -788,7 +859,7 @@
             <td class="py-3 px-4 text-gray-700">${r.software}</td>
             <td class="py-3 px-4 text-gray-600">${r.fecha}</td>
             <td class="py-3 px-4 text-gray-600 font-mono text-xs">${r.bloque}</td>
-            <td class="py-3 px-4 text-center"><span class="badge-estado ${estadoColor}">${estadoLabel}</span></td>
+            <td class="py-3 px-4 text-center"><span class="badge-estado ${estadoClass}">${estadoLabel}</span></td>
             <td class="py-3 px-4 text-center">
               <button data-id="${r.id}" class="btn-eliminar-admin bg-rose-100 hover:bg-rose-200 text-rose-800 font-semibold px-3 py-1.5 rounded-xl text-xs"><i class="fas fa-trash-alt mr-1"></i> Eliminar</button>
             </td>
@@ -796,6 +867,18 @@
       });
       tablaBody.innerHTML = html;
       totalReservasSpan.textContent = reservas.length;
+
+      document.querySelectorAll('.btn-eliminar-admin').forEach(btn => {
+        btn.addEventListener('click', async function() {
+          const id = this.getAttribute('data-id');
+          if (confirm('¿Eliminar esta reservación permanentemente?')) {
+            await window.firebaseModules.deleteDoc(window.firebaseModules.doc(window.db, "reservas", id));
+            await sincronizarDatosDesdeNube();
+            renderizarTablaAdmin();
+            renderizarTablaSeguimiento();
+          }
+        });
+      });
     }
 
     function renderizarTablaSeguimiento() {
@@ -814,7 +897,7 @@
       let html = '';
       reservasFiltradas.sort((a, b) => b.fecha.localeCompare(a.fecha)).forEach(r => {
         const estadoLabel = ESTADO_LABELS[r.estado] || 'Pendiente';
-        const estadoColor = ESTADO_COLORS[r.estado] || ESTADO_COLORS[ESTADOS.PENDIENTE];
+        const estadoClass = ESTADO_CLASSES[r.estado] || 'badge-pendiente';
         
         // Opciones de cambio de estado (excluyendo el estado actual)
         const opcionesEstado = Object.entries(ESTADO_LABELS)
@@ -829,7 +912,7 @@
             <td class="py-3 px-4 font-semibold text-gray-800">${r.nombre}</td>
             <td class="py-3 px-4 text-gray-600">${r.fecha}</td>
             <td class="py-3 px-4 text-gray-600 font-mono text-xs">${r.bloque}</td>
-            <td class="py-3 px-4 text-center"><span class="badge-estado ${estadoColor}">${estadoLabel}</span></td>
+            <td class="py-3 px-4 text-center"><span class="badge-estado ${estadoClass}">${estadoLabel}</span></td>
             <td class="py-3 px-4 text-center">
               <select class="cambio-estado-select text-xs rounded-lg border border-gray-300 bg-white px-2 py-1.5 pr-8" data-id="${r.id}">
                 <option value="">Cambiar a...</option>
@@ -867,18 +950,30 @@
       [vistaSeleccionRol, vistaEstudianteLogin, vistaAdminLogin, vistaAlumno, vistaMisReservas, vistaAdminPanel, vistaQuejas].forEach(v => v.classList.add('hidden'));
       headerAcciones.innerHTML = '';
 
-      if (vista === 'seleccion') vistaSeleccionRol.classList.remove('hidden');
-      else if (vista === 'estudiante_login') vistaEstudianteLogin.classList.remove('hidden');
-      else if (vista === 'estudiante_sala') {
+      if (vista === 'seleccion') {
+        vistaSeleccionRol.classList.remove('hidden');
+        // Detener verificación automática cuando no hay sesión activa
+        if (intervaloActualizacion) {
+          clearInterval(intervaloActualizacion);
+          intervaloActualizacion = null;
+        }
+      } else if (vista === 'estudiante_login') {
+        vistaEstudianteLogin.classList.remove('hidden');
+      } else if (vista === 'estudiante_sala') {
         if (!alumnoSesion) { cambiarVista('estudiante_login'); return; }
         lblAlumnoConectado.textContent = alumnoSesion.nombre;
         lblMatriculaConectada.textContent = alumnoSesion.matricula;
         actualizarContadorMisReservas();
         vistaAlumno.classList.remove('hidden');
         renderizarSalaCine();
-      } else if (vista === 'mis_reservas') { vistaMisReservas.classList.remove('hidden'); renderizarTablaMisReservas(); }
-      else if (vista === 'admin_login') vistaAdminLogin.classList.remove('hidden');
-      else if (vista === 'admin_panel') {
+        // Iniciar verificación automática
+        iniciarVerificacionAutomatica();
+      } else if (vista === 'mis_reservas') { 
+        vistaMisReservas.classList.remove('hidden'); 
+        renderizarTablaMisReservas(); 
+      } else if (vista === 'admin_login') {
+        vistaAdminLogin.classList.remove('hidden');
+      } else if (vista === 'admin_panel') {
         vistaAdminPanel.classList.remove('hidden');
         localStorage.setItem('upslp_admin_sesion', 'activo');
         renderizarTablaAdmin();
@@ -886,19 +981,20 @@
         renderizarAdminGridSw();
         headerAcciones.innerHTML = `<button id="btnSalirAdminHeader" class="text-xs bg-slate-100 hover:bg-slate-200 text-gray-700 font-semibold px-3.5 py-1.5 rounded-full border">Volver inicio</button>`;
         document.getElementById('btnSalirAdminHeader').addEventListener('click', () => cambiarVista('seleccion'));
-        // Mostrar tab por defecto
         cambiarTabAdmin('reservas_activas');
-      } else if (vista === 'quejas') vistaQuejas.classList.remove('hidden');
+        // Iniciar verificación automática para el admin también
+        iniciarVerificacionAutomatica();
+      } else if (vista === 'quejas') {
+        vistaQuejas.classList.remove('hidden');
+      }
     }
 
     function cambiarTabAdmin(tab) {
       currentTab = tab;
-      // Ocultar todos los contenidos
       tabReservasActivasContent.classList.add('hidden');
       tabSeguimientoReservasContent.classList.add('hidden');
       tabSoftwareAdminContent.classList.add('hidden');
       
-      // Resetear estilos de pestañas
       [tabReservasActivas, tabSeguimientoReservas, tabSoftwareAdmin].forEach(t => {
         t.classList.remove('border-[var(--upslp-orange)]', 'text-[var(--upslp-blue)]');
         t.classList.add('text-gray-500', 'border-transparent');
@@ -939,18 +1035,25 @@
       cambiarVista('estudiante_sala');
     });
 
-    btnCerrarSesionEstudiante.addEventListener('click', () => { localStorage.removeItem('upslp_alumno_sesion'); alumnoSesion = null; cambiarVista('seleccion'); });
+    btnCerrarSesionEstudiante.addEventListener('click', () => { 
+      localStorage.removeItem('upslp_alumno_sesion'); 
+      alumnoSesion = null; 
+      if (intervaloActualizacion) {
+        clearInterval(intervaloActualizacion);
+        intervaloActualizacion = null;
+      }
+      cambiarVista('seleccion'); 
+    });
+    
     btnVerMisReservas.addEventListener('click', () => cambiarVista('mis_reservas'));
     btnVolverDesdeMisReservas.addEventListener('click', () => cambiarVista('estudiante_sala'));
     btnIrQuejasDesdeAlumno.addEventListener('click', () => cambiarVista('quejas'));
     btnVolverDesdeQuejas.addEventListener('click', () => cambiarVista(localStorage.getItem('upslp_admin_sesion') === 'activo' ? 'admin_panel' : 'estudiante_sala'));
 
-    // Eventos de pestañas del admin
     tabReservasActivas.addEventListener('click', () => cambiarTabAdmin('reservas_activas'));
     tabSeguimientoReservas.addEventListener('click', () => cambiarTabAdmin('seguimiento'));
     tabSoftwareAdmin.addEventListener('click', () => cambiarTabAdmin('software'));
 
-    // Filtro de estado en seguimiento
     filtroEstadoSeguimiento.addEventListener('change', renderizarTablaSeguimiento);
 
     filtroFecha.addEventListener('change', renderizarSalaCine);
@@ -974,7 +1077,7 @@
         software: softwareStr, 
         fecha, 
         bloque,
-        estado: ESTADOS.PENDIENTE // Estado inicial
+        estado: ESTADOS.PENDIENTE
       };
 
       try {
@@ -985,6 +1088,8 @@
         panelFormReserva.classList.add('hidden');
         pcSeleccionada = null;
         renderizarSalaCine();
+        renderizarTablaAdmin();
+        renderizarTablaSeguimiento();
       } catch (err) {
         console.error(err);
         alert("Error al guardar en Firebase.");
@@ -1002,9 +1107,16 @@
       }
     });
 
-    btnCerrarSesionAdmin.addEventListener('click', () => { localStorage.removeItem('upslp_admin_sesion'); cambiarVista('seleccion'); });
+    btnCerrarSesionAdmin.addEventListener('click', () => { 
+      localStorage.removeItem('upslp_admin_sesion'); 
+      if (intervaloActualizacion) {
+        clearInterval(intervaloActualizacion);
+        intervaloActualizacion = null;
+      }
+      cambiarVista('seleccion'); 
+    });
 
-    // Inicialización de fechas y datos
+    // Inicialización
     filtroFecha.value = new Date().toISOString().split('T')[0];
     populateBloques();
     populateCheckboxesSoftware();
